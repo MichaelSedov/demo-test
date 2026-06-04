@@ -97,6 +97,6 @@ function reject(
   };
 }
 
-export function buildOrdersForTrade(trade: LeaderTrade, followers: FollowerAccount[]): CopiedOrder[] {
-  return followers.map((follower) => buildCopiedOrder(trade, follower));
+export function buildOrdersForTrade(trade: LeaderTrade, followers: FollowerAccount[], slippageBps = 15): CopiedOrder[] {
+  return followers.map((follower) => buildCopiedOrder(trade, follower, slippageBps));
 }

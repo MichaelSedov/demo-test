@@ -1,112 +1,92 @@
 import React, { useEffect, useState } from 'react';
 import { createRoot } from 'react-dom/client';
+import { Follower, FormValues, SimResult, SymbolCode } from './types';
+import { mapResults, parseNum, validate } from './utils';
+import { LeaderForm } from './LeaderForm';
+import { FollowerCard } from './FollowerCard';
+import { Results } from './Results';
 import './styles.css';
-
-type Side = 'BUY' | 'SELL';
-type SymbolCode = 'BTCUSDT' | 'ETHUSDT' | 'SOLUSDT';
-
-type Order = {
-  followerId: string;
-  leaderTradeId: string;
-  symbol: SymbolCode;
-  side: Side;
-  quantity: number;
-  estimatedFillPrice: number;
-  notional: number;
-  marginRequired: number;
-  status: 'ACCEPTED' | 'REJECTED';
-  rejectionReason?: string;
-};
-
-type Follower = {
-  id: string;
-  name: string;
-  equity: number;
-  availableBalance: number;
-  copyRatio: number;
-  maxLeverage: number;
-  maxNotionalPerTrade: number;
-  allowedSymbols: SymbolCode[];
-};
 
 const API_URL = 'http://localhost:4000/api';
 
 function App() {
   const [followers, setFollowers] = useState<Follower[]>([]);
-  const [orders, setOrders] = useState<Order[]>([]);
-  const [form, setForm] = useState({ symbol: 'BTCUSDT' as SymbolCode, side: 'BUY' as Side, quantity: 0.5, price: 68000, leverage: 5 });
-  const [error, setError] = useState('');
+  const [results, setResults]     = useState<SimResult[] | null>(null);
+  const [loading, setLoading]     = useState(false);
+  const [form, setForm] = useState<FormValues>({
+    symbol: 'BTCUSDT', side: 'BUY', qty: '0.5', price: '68000', leverage: '5', slippage: '15',
+  });
 
   useEffect(() => {
-    fetch(`${API_URL}/followers`).then((res) => res.json()).then(setFollowers);
+    fetch(`${API_URL}/followers`).then((r) => r.json()).then(setFollowers);
   }, []);
 
-  async function simulateTrade(event: React.FormEvent) {
-    event.preventDefault();
-    setError('');
-    const response = await fetch(`${API_URL}/simulate-copy`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(form)
-    });
-    const payload = await response.json();
-    if (!response.ok) {
-      setError('Please check quantity, price, and leverage.');
-      return;
+  const set = (k: keyof FormValues, v: string) => setForm((f) => ({ ...f, [k]: v }));
+
+  const run = async () => {
+    const { q, p, l, s } = validate(form);
+    setLoading(true);
+    try {
+      const res = await fetch(`${API_URL}/simulate-copy`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ symbol: form.symbol, side: form.side, quantity: q, price: p, leverage: l, slippageBps: s }),
+      });
+      const payload = await res.json();
+      if (!res.ok) return;
+      setResults(mapResults(payload.orders, followers, l));
+    } finally {
+      setLoading(false);
     }
-    setOrders(payload.orders);
-  }
+  };
 
   return (
-    <main className="page">
-      <section className="hero">
-        <p className="eyebrow">Demo</p>
-        <h1>Copy Trading Simulator</h1>
-        <p className="subtitle prose prose-2xl">Run a leader order and review copied follower orders with risk checks.</p>
-      </section>
+    <div className="wrap">
+      <p className="eyebrow">DEMO</p>
+      <h1 className="title">Copy Trading Simulator</h1>
+      <p className="lede">Fire a leader order, then see exactly which followers copied it, how much capital each committed, and why the rest got blocked.</p>
 
-      <section className="grid">
-        <form className="card" onSubmit={simulateTrade}>
-          <h2>Leader trade</h2>
-          <label>Symbol<select value={form.symbol} onChange={(e) => setForm({ ...form, symbol: e.target.value as SymbolCode })}><option>BTCUSDT</option><option>ETHUSDT</option><option>SOLUSDT</option></select></label>
-          <label>Side<select value={form.side} onChange={(e) => setForm({ ...form, side: e.target.value as Side })}><option>BUY</option><option>SELL</option></select></label>
-          <label>Quantity<input type="number" step="0.001" value={form.quantity} onChange={(e) => setForm({ ...form, quantity: Number(e.target.value) })} /></label>
-          <label>Price<input type="number" step="0.01" value={form.price} onChange={(e) => setForm({ ...form, price: Number(e.target.value) })} /></label>
-          <label>Leverage<input type="number" value={form.leverage} onChange={(e) => setForm({ ...form, leverage: Number(e.target.value) })} /></label>
-          <button>Run simulation</button>
-          {error && <p className="error">{error}</p>}
-        </form>
+      <div className="grid">
+        <LeaderForm form={form} set={set} onRun={run} followers={followers} />
 
-        <section className="card">
-          <h2>Followers</h2>
+        <div className="card">
+          <div className="card-h">
+            <h2>Followers</h2>
+            <span className="sub">{followers.length} mirroring this leader</span>
+          </div>
           <div className="followers">
-            {followers.map((follower) => (
-              <article key={follower.id} className="follower">
-                <strong>{follower.name}</strong>
-                <span>Balance ${follower.availableBalance.toLocaleString()} · Ratio {follower.copyRatio}x</span>
-                <span>Max lev {follower.maxLeverage}x · Max trade ${follower.maxNotionalPerTrade.toLocaleString()}</span>
-              </article>
+            {followers.map((f) => (
+              <FollowerCard key={f.id} f={f} activeSymbol={form.symbol as SymbolCode}
+                result={results?.find((r) => r.fo.id === f.id) ?? null} />
             ))}
           </div>
-        </section>
-      </section>
+        </div>
+      </div>
 
-      <section className="card table-card">
-        <h2>Copied orders</h2>
-        <table>
-          <thead><tr><th>Follower</th><th>Symbol</th><th>Side</th><th>Qty</th><th>Fill price</th><th>Notional</th><th>Margin</th><th>Status</th></tr></thead>
-          <tbody>
-            {orders.map((order) => (
-              <tr key={`${order.followerId}-${order.leaderTradeId}`}>
-                <td>{order.followerId}</td><td>{order.symbol}</td><td>{order.side}</td><td>{order.quantity}</td><td>${order.estimatedFillPrice}</td><td>${order.notional}</td><td>${order.marginRequired}</td>
-                <td><span className={order.status === 'ACCEPTED' ? 'accepted' : 'rejected'}>{order.status}</span>{order.rejectionReason && <small>{order.rejectionReason}</small>}</td>
-              </tr>
-            ))}
-            {orders.length === 0 && <tr><td colSpan={8} className="empty">No results yet. Run a simulation.</td></tr>}
-          </tbody>
-        </table>
-      </section>
-    </main>
+      {results ? (
+        <Results results={results} form={form} />
+      ) : (
+        <div className="card results">
+          <div className="empty">
+            <div className="ic">
+              <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M3 3v18h18" /><path d="M7 14l4-4 3 3 5-6" />
+              </svg>
+            </div>
+            <h3>No simulation yet</h3>
+            <div>Set up the leader trade and hit <b style={{ color: 'var(--muted)' }}>Run simulation</b> to see copied orders, fill rate, and per-follower risk checks.</div>
+          </div>
+        </div>
+      )}
+
+      {loading && (
+        <div style={{ position: 'fixed', inset: 0, display: 'grid', placeItems: 'center', background: 'rgba(0,0,0,.3)', zIndex: 50 }}>
+          <div style={{ color: 'var(--text)', fontSize: 14, background: 'var(--panel)', padding: '14px 22px', borderRadius: 12, border: '1px solid var(--line-2)' }}>
+            Running simulation…
+          </div>
+        </div>
+      )}
+    </div>
   );
 }
 

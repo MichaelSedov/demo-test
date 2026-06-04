@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { applySlippage, buildCopiedOrder, roundDownToStep } from './copyEngine.js';
+import { applySlippage, buildCopiedOrder, buildOrdersForTrade, roundDownToStep } from './copyEngine.js';
+import { followers } from './fixtures.js';
 import { FollowerAccount, LeaderTrade } from './types.js';
 
 const follower: FollowerAccount = {
@@ -59,5 +60,33 @@ describe('copy trading engine', () => {
     const order = buildCopiedOrder(trade, lowBalanceFollower);
     expect(order.status).toBe('REJECTED');
     expect(order.rejectionReason).toContain('margin');
+  });
+
+  it('rejects trades where notional exceeds follower max notional per trade', () => {
+    // quantity=1, copyRatio=0.5 → raw=0.5, notional ≈ 0.5 * 68000 = 34000 >> maxNotionalPerTrade=10000
+    const bigTrade = { ...trade, quantity: 1 };
+    const order = buildCopiedOrder(bigTrade, follower);
+    expect(order.status).toBe('REJECTED');
+    expect(order.rejectionReason).toContain('notional');
+  });
+
+  it('rejects when quantity rounds down to zero', () => {
+    // quantity=0.001, copyRatio=0.5 → raw=0.0005, step=0.001 → rounds to 0
+    const tinyTrade = { ...trade, quantity: 0.001 };
+    const order = buildCopiedOrder(tinyTrade, follower);
+    expect(order.status).toBe('REJECTED');
+    expect(order.rejectionReason).toContain('minimum');
+  });
+
+  it('gives a worse (lower) fill price for SELL orders', () => {
+    const sellTrade = { ...trade, side: 'SELL' as const };
+    const order = buildCopiedOrder(sellTrade, follower, 15);
+    expect(order.estimatedFillPrice).toBeLessThan(sellTrade.price);
+  });
+
+  it('buildOrdersForTrade returns one order per follower', () => {
+    const orders = buildOrdersForTrade(trade, followers);
+    expect(orders).toHaveLength(followers.length);
+    expect(orders.every((o) => o.leaderTradeId === trade.id)).toBe(true);
   });
 });
