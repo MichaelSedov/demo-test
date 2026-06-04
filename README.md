@@ -14,6 +14,11 @@ This repository is a focused technical test for candidates.
 
 Read `docs/CANDIDATE_BRIEF.md` and complete the task in **2-3 hours**.
 
+## Screenshots
+
+![Simulator form and follower cards](screen-1.png)
+![Simulation results with KPIs and order table](screen-2.png)
+
 ## Run locally
 
 ```bash
